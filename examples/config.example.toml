@@ -1,0 +1,4 @@
+agent_name = "local-coder"
+model = "replace-me"
+instructions_path = "instruction.txt"
+log_level = "INFO"
