@@ -32,7 +32,7 @@ class AgentConfig:
             ),
             database_url=os.getenv(
                 "AGENT_DATABASE_URL",
-                "postgresql://postgres:postgres@localhost:5432/cli_coding_agent",
+                "postgresql://phanhieu@localhost:5432/coding_agent_db",
             ),
             session_id=session_id or os.getenv("AGENT_SESSION_ID"),
             log_level=os.getenv("AGENT_LOG_LEVEL", "INFO"),

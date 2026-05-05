@@ -22,6 +22,19 @@ agent --help
 pytest
 ```
 
+## Docker with PostgreSQL
+
+For a containerized app plus database setup, use:
+
+```bash
+docker compose up --build
+```
+
+If you override `AGENT_DATABASE_URL`, remember that `localhost` inside the app
+container does not point to the PostgreSQL container. Use `db` for the Compose
+service name or `host.docker.internal` when connecting back to a database on the
+host machine.
+
 ## Suggested next steps
 
 1. Replace the stubbed agent loop in `src/cli_coding_agent/agent.py` with your model orchestration.
