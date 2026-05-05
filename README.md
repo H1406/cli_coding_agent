@@ -26,7 +26,7 @@ pytest
 
 1. Replace the stubbed agent loop in `src/cli_coding_agent/agent.py` with your model orchestration.
 2. Expand `src/cli_coding_agent/tools.py` with the tools your agent is allowed to call.
-3. Add provider-specific environment variables in `.env.example`.
+3. Wire the runtime to your configured provider. The repo now defaults to Hugging Face with `Qwen/Qwen2.5-Coder-1.5B` in the config examples, but the current runtime still needs provider-specific inference code.
 4. Update `docs/deployment.md` once you choose your runtime target.
 
 ## Project layout

@@ -12,7 +12,9 @@ license = { file = "LICENSE" }
 authors = [
   { name = "Phan Hieu" }
 ]
-dependencies = []
+dependencies = [
+  "psycopg[binary]>=3.2",
+]
 
 [project.optional-dependencies]
 dev = [
