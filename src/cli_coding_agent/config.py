@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -12,6 +13,13 @@ class AgentConfig:
     instructions_path: str
     huggingface_model_id: str
     database_url: str
+    repo_root: str
+    repo_id: str
+    repo_context_limit: int = 3
+    conversation_context_limit: int = 3
+    recent_message_limit: int = 4
+    summary_trigger_messages: int = 6
+    prompt_token_budget: int = 1800
     session_id: str | None = None
     log_level: str = "INFO"
 
@@ -34,6 +42,13 @@ class AgentConfig:
                 "AGENT_DATABASE_URL",
                 "postgresql://phanhieu@localhost:5432/coding_agent_db",
             ),
+            repo_root=os.getenv("AGENT_REPO_ROOT", str(Path.cwd())),
+            repo_id=os.getenv("AGENT_REPO_ID", Path.cwd().resolve().as_posix()),
+            repo_context_limit=int(os.getenv("AGENT_REPO_CONTEXT_LIMIT", "3")),
+            conversation_context_limit=int(os.getenv("AGENT_CONVERSATION_CONTEXT_LIMIT", "3")),
+            recent_message_limit=int(os.getenv("AGENT_RECENT_MESSAGE_LIMIT", "4")),
+            summary_trigger_messages=int(os.getenv("AGENT_SUMMARY_TRIGGER_MESSAGES", "6")),
+            prompt_token_budget=int(os.getenv("AGENT_PROMPT_TOKEN_BUDGET", "1800")),
             session_id=session_id or os.getenv("AGENT_SESSION_ID"),
             log_level=os.getenv("AGENT_LOG_LEVEL", "INFO"),
         )

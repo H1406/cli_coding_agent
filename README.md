@@ -22,6 +22,30 @@ agent --help
 pytest
 ```
 
+## Interactive usage from any repo
+
+Run the agent from the repository you want indexed:
+
+```bash
+cd /path/to/any/repo
+agent
+```
+
+It will start an interactive loop and keep the conversation in the same stored
+session until you type `exit` or `stop`.
+
+You can also point at a repo explicitly:
+
+```bash
+agent --repo-root /path/to/any/repo
+```
+
+To continue the same historical conversation later, reuse the same session id:
+
+```bash
+agent --session-id your-session-id
+```
+
 ## Docker with PostgreSQL
 
 For a containerized app plus database setup, use:

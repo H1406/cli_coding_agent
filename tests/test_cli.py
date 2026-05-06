@@ -1,57 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from cli_coding_agent.agent import CodingAgent
+from cli_coding_agent.cli import build_parser
 from cli_coding_agent.config import AgentConfig
 from cli_coding_agent.prompts import load_instructions
-from cli_coding_agent.storage.models import MessageRecord, SessionRecord
-
-
-@dataclass
-class InMemoryConversationStore:
-    sessions: dict[str, SessionRecord]
-    messages: list[MessageRecord]
-
-    def __init__(self) -> None:
-        self.sessions = {}
-        self.messages = []
-
-    def create_session(self, title: str, session_id: str | None = None) -> SessionRecord:
-        resolved_id = session_id or f"session-{len(self.sessions) + 1}"
-        timestamp = datetime.now(timezone.utc)
-        record = SessionRecord(
-            id=resolved_id,
-            title=title,
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-        self.sessions[resolved_id] = record
-        return record
-
-    def get_session(self, session_id: str) -> SessionRecord | None:
-        return self.sessions.get(session_id)
-
-    def list_messages(self, session_id: str, limit: int | None = None) -> list[MessageRecord]:
-        matching = [message for message in self.messages if message.session_id == session_id]
-        if limit is None:
-            return matching
-        return matching[:limit]
-
-    def append_message(self, session_id: str, role: str, content: str) -> MessageRecord:
-        sequence_no = len([m for m in self.messages if m.session_id == session_id]) + 1
-        record = MessageRecord(
-            id=f"message-{len(self.messages) + 1}",
-            session_id=session_id,
-            role=role,
-            content=content,
-            created_at=datetime.now(timezone.utc),
-            sequence_no=sequence_no,
-        )
-        self.messages.append(record)
-        return record
+from tests.support import InMemoryConversationStore
 
 
 def test_load_instructions_from_relative_repo_path(tmp_path, monkeypatch) -> None:
@@ -78,6 +33,8 @@ def test_agent_builds_prompt_with_instructions(tmp_path) -> None:
             instructions_path=str(instruction_path),
             huggingface_model_id="Qwen/Qwen2.5-Coder-1.5B",
             database_url="postgresql://example",
+            repo_root=str(tmp_path),
+            repo_id="repo-test",
         ),
         store,
     )
@@ -102,6 +59,8 @@ def test_agent_run_passes_built_prompt_to_model(tmp_path, monkeypatch) -> None:
             instructions_path=str(instruction_path),
             huggingface_model_id="Qwen/Qwen2.5-Coder-1.5B",
             database_url="postgresql://example",
+            repo_root=str(tmp_path),
+            repo_id="repo-test",
         ),
         store,
     )
@@ -139,6 +98,8 @@ def test_agent_reuses_explicit_session_id(tmp_path, monkeypatch) -> None:
             instructions_path=str(instruction_path),
             huggingface_model_id="Qwen/Qwen2.5-Coder-1.5B",
             database_url="postgresql://example",
+            repo_root=str(tmp_path),
+            repo_id="repo-test",
             session_id="session-42",
         ),
         store,
@@ -155,8 +116,30 @@ def test_agent_reuses_explicit_session_id(tmp_path, monkeypatch) -> None:
 def test_config_reads_database_url_and_session_id(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_DATABASE_URL", "postgresql://db/test")
     monkeypatch.setenv("AGENT_SESSION_ID", "session-from-env")
+    monkeypatch.setenv("AGENT_REPO_ROOT", "/tmp/repo")
+    monkeypatch.setenv("AGENT_REPO_ID", "repo-from-env")
+    monkeypatch.setenv("AGENT_REPO_CONTEXT_LIMIT", "5")
+    monkeypatch.setenv("AGENT_CONVERSATION_CONTEXT_LIMIT", "2")
+    monkeypatch.setenv("AGENT_RECENT_MESSAGE_LIMIT", "6")
+    monkeypatch.setenv("AGENT_SUMMARY_TRIGGER_MESSAGES", "8")
+    monkeypatch.setenv("AGENT_PROMPT_TOKEN_BUDGET", "900")
 
     config = AgentConfig.from_env()
 
     assert config.database_url == "postgresql://db/test"
     assert config.session_id == "session-from-env"
+    assert config.repo_root == "/tmp/repo"
+    assert config.repo_id == "repo-from-env"
+    assert config.repo_context_limit == 5
+    assert config.conversation_context_limit == 2
+    assert config.recent_message_limit == 6
+    assert config.summary_trigger_messages == 8
+    assert config.prompt_token_budget == 900
+
+
+def test_parser_accepts_repo_root_flag() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["--repo-root", "/tmp/project"])
+
+    assert args.repo_root == "/tmp/project"
