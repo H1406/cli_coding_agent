@@ -20,6 +20,8 @@ class AgentConfig:
     recent_message_limit: int = 4
     summary_trigger_messages: int = 6
     prompt_token_budget: int = 1800
+    max_action_steps: int = 8
+    tool_run_timeout_seconds: int = 20
     session_id: str | None = None
     log_level: str = "INFO"
 
@@ -49,6 +51,8 @@ class AgentConfig:
             recent_message_limit=int(os.getenv("AGENT_RECENT_MESSAGE_LIMIT", "4")),
             summary_trigger_messages=int(os.getenv("AGENT_SUMMARY_TRIGGER_MESSAGES", "6")),
             prompt_token_budget=int(os.getenv("AGENT_PROMPT_TOKEN_BUDGET", "1800")),
+            max_action_steps=int(os.getenv("AGENT_MAX_ACTION_STEPS", "8")),
+            tool_run_timeout_seconds=int(os.getenv("AGENT_TOOL_RUN_TIMEOUT_SECONDS", "20")),
             session_id=session_id or os.getenv("AGENT_SESSION_ID"),
             log_level=os.getenv("AGENT_LOG_LEVEL", "INFO"),
         )

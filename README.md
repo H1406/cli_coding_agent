@@ -34,6 +34,11 @@ agent
 It will start an interactive loop and keep the conversation in the same stored
 session until you type `exit` or `stop`.
 
+The agent can now take actions through a bounded tool loop using:
+- `READ`
+- `WRITE`
+- `RUN`
+
 You can also point at a repo explicitly:
 
 ```bash

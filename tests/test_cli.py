@@ -123,6 +123,8 @@ def test_config_reads_database_url_and_session_id(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_RECENT_MESSAGE_LIMIT", "6")
     monkeypatch.setenv("AGENT_SUMMARY_TRIGGER_MESSAGES", "8")
     monkeypatch.setenv("AGENT_PROMPT_TOKEN_BUDGET", "900")
+    monkeypatch.setenv("AGENT_MAX_ACTION_STEPS", "10")
+    monkeypatch.setenv("AGENT_TOOL_RUN_TIMEOUT_SECONDS", "15")
 
     config = AgentConfig.from_env()
 
@@ -135,6 +137,8 @@ def test_config_reads_database_url_and_session_id(monkeypatch) -> None:
     assert config.recent_message_limit == 6
     assert config.summary_trigger_messages == 8
     assert config.prompt_token_budget == 900
+    assert config.max_action_steps == 10
+    assert config.tool_run_timeout_seconds == 15
 
 
 def test_parser_accepts_repo_root_flag() -> None:

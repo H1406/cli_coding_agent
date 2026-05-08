@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,7 +23,20 @@ from cli_coding_agent.retrieval import (
     RetrievedRepoChunk,
 )
 from cli_coding_agent.storage import ConversationStore, ConversationSummaryRecord, MessageRecord
-from cli_coding_agent.tools import ToolRegistry
+from cli_coding_agent.tools import ToolRegistry, ToolResult
+
+
+@dataclass(frozen=True, slots=True)
+class AgentAction:
+    tool: str
+    tool_input: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedAgentOutput:
+    final: str | None = None
+    action: AgentAction | None = None
+    raw_text: str = ""
 
 
 class CodingAgent:
@@ -30,7 +44,10 @@ class CodingAgent:
         self.config = config
         self.store = store
         self.instructions = load_instructions(config.instructions_path)
-        self.tools = ToolRegistry.default()
+        self.tools = ToolRegistry.default(
+            config.repo_root,
+            run_timeout_seconds=config.tool_run_timeout_seconds,
+        )
         self.embedder = HashEmbeddingClient()
         self.indexing_service = RepositoryIndexingService(store, self.embedder)
         self.repo_retriever = RepoRetriever(store, self.embedder)
@@ -89,16 +106,19 @@ class CodingAgent:
         summary: ConversationSummaryRecord | None = None,
         conversation_memories: list[RetrievedConversationMemory] | None = None,
         repo_chunks: list[RetrievedRepoChunk] | None = None,
+        tool_history: list[str] | None = None,
     ) -> str:
         prompt = user_prompt.strip()
         recent_messages = recent_messages or []
         conversation_memories = conversation_memories or []
         repo_chunks = repo_chunks or []
+        tool_history = tool_history or []
         sections = self._build_context_sections(
             summary=summary,
             recent_messages=recent_messages,
             conversation_memories=conversation_memories,
             repo_chunks=repo_chunks,
+            tool_history=tool_history,
         )
         context_block = self._fit_sections_to_budget(sections, self.config.prompt_token_budget)
         if not self.instructions:
@@ -120,8 +140,10 @@ class CodingAgent:
         recent_messages: list[MessageRecord],
         conversation_memories: list[RetrievedConversationMemory],
         repo_chunks: list[RetrievedRepoChunk],
+        tool_history: list[str],
     ) -> list[str]:
         sections: list[str] = []
+        sections.append(self._tool_protocol())
         if summary is not None:
             sections.append(f"Conversation summary:\n{summary.summary_text}")
 
@@ -137,7 +159,21 @@ class CodingAgent:
         if repo_block:
             sections.append(repo_block)
 
+        if tool_history:
+            sections.append("Tool interaction history:\n" + "\n\n".join(tool_history))
+
         return sections
+
+    def _tool_protocol(self) -> str:
+        return (
+            "Tool protocol:\n"
+            "You may either return a final answer or a single JSON action.\n"
+            "Final answer format:\n"
+            '{"final": "your answer"}\n'
+            "Action format:\n"
+            '{"action": {"tool": "READ|WRITE|RUN", "input": {...}}}\n'
+            "Only return JSON when choosing an action. Use a final answer when you are done."
+        )
 
     def _fit_sections_to_budget(self, sections: list[str], token_budget: int) -> str:
         included: list[str] = []
@@ -259,7 +295,7 @@ class CodingAgent:
         assert self.tokenizer is not None
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(device=self.model.device)
-        outputs = self.model.generate(**inputs, max_new_tokens=100)
+        outputs = self.model.generate(**inputs, max_new_tokens=300)
         generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         return self.tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
@@ -321,14 +357,119 @@ class CodingAgent:
             conversation_memories=conversation_memories,
             repo_chunks=repo_chunks,
         )
-        full_prompt = self.build_prompt(
-            prompt,
-            recent_messages=recent_messages,
+        response = self._run_action_loop(
+            session_id=session_id,
+            user_prompt=prompt,
             summary=summary,
+            recent_messages=recent_messages,
             conversation_memories=conversation_memories,
             repo_chunks=repo_chunks,
         )
-        response = self.llm(full_prompt)
-        self.store.append_message(session_id=session_id, role="assistant", content=response)
         self.memory_service.refresh_session_memory(session_id)
         return response
+
+    def _run_action_loop(
+        self,
+        *,
+        session_id: str,
+        user_prompt: str,
+        summary: ConversationSummaryRecord | None,
+        recent_messages: list[MessageRecord],
+        conversation_memories: list[RetrievedConversationMemory],
+        repo_chunks: list[RetrievedRepoChunk],
+    ) -> str:
+        tool_history: list[str] = []
+
+        for _ in range(self.config.max_action_steps):
+            prompt = self.build_prompt(
+                user_prompt,
+                recent_messages=recent_messages,
+                summary=summary,
+                conversation_memories=conversation_memories,
+                repo_chunks=repo_chunks,
+                tool_history=tool_history,
+            )
+            raw_output = self.llm(prompt)
+            parsed = self._parse_agent_output(raw_output)
+
+            if parsed.final is not None:
+                self.store.append_message(session_id=session_id, role="assistant", content=parsed.final)
+                return parsed.final
+
+            if parsed.action is None:
+                self.store.append_message(session_id=session_id, role="assistant", content=parsed.raw_text)
+                return parsed.raw_text
+
+            self.store.append_message(
+                session_id=session_id,
+                role="assistant_action",
+                content=json.dumps(
+                    {
+                        "tool": parsed.action.tool,
+                        "input": parsed.action.tool_input,
+                    }
+                ),
+            )
+            result = self.tools.run(parsed.action.tool, parsed.action.tool_input)
+            self.store.append_message(session_id=session_id, role="tool", content=result.output)
+            tool_history.append(self._format_tool_exchange(parsed.action, result))
+            self.memory_service.refresh_session_memory(session_id)
+            summary, recent_messages, conversation_memories = self._retrieve_conversation_context(
+            session_id,
+            user_prompt,
+        )
+        repo_chunks = self._retrieve_repo_context(user_prompt) 
+
+        fallback = "Stopped after reaching the maximum number of action steps."
+        self.store.append_message(session_id=session_id, role="assistant", content=fallback)
+        return fallback
+
+    def _parse_agent_output(self, raw_output: str) -> ParsedAgentOutput:
+        text = raw_output.strip()
+        payload = self._extract_json_object(text)
+        if payload is None:
+            return ParsedAgentOutput(final=text, raw_text=text)
+
+        if isinstance(payload.get("final"), str):
+            return ParsedAgentOutput(final=payload["final"].strip(), raw_text=text)
+
+        action_payload = payload.get("action")
+        if isinstance(action_payload, dict):
+            tool = action_payload.get("tool")
+            tool_input = action_payload.get("input", {})
+            if isinstance(tool, str) and isinstance(tool_input, dict):
+                return ParsedAgentOutput(
+                    action=AgentAction(tool=tool.strip().upper(), tool_input=tool_input),
+                    raw_text=text,
+                )
+
+        return ParsedAgentOutput(final=text, raw_text=text)
+
+    def _extract_json_object(self, text: str) -> dict[str, Any] | None:
+        if not text:
+            return None
+        candidates = [text]
+        if "```" in text:
+            for block in text.split("```"):
+                stripped = block.strip()
+                if stripped.startswith("json"):
+                    stripped = stripped[4:].strip()
+                candidates.append(stripped)
+
+        for candidate in candidates:
+            if not candidate.startswith("{"):
+                continue
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    def _format_tool_exchange(self, action: AgentAction, result: ToolResult) -> str:
+        status = "ok" if result.ok else "error"
+        return (
+            f"Action: {action.tool} {json.dumps(action.tool_input, ensure_ascii=True)}\n"
+            f"Observation ({status}):\n{result.output}"
+        )
